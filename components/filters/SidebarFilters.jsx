@@ -16,6 +16,7 @@ export default function SidebarFilters({
   const [isLoading, setIsLoading] = useState(false);
   const [isSimMode, setIsSimMode] = useState(false);
   const [simMonth, setSimMonth] = useState(new Date().getMonth() + 1);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     if (!geoData) return;
@@ -39,6 +40,7 @@ export default function SidebarFilters({
   const handlePredict = async () => {
     if (!selectedProvince || !selectedDistrict) return;
     setIsLoading(true);
+    setError(null);
     try {
       const response = await fetch("/api/predict", {
         method: "POST",
@@ -51,10 +53,17 @@ export default function SidebarFilters({
           isSimulation: isSimMode
         }),
       });
+      
+      if (!response.ok) {
+        throw new Error("AI Server Error: Could not generate prediction.");
+      }
+      
       const data = await response.json();
       if (onPredict) onPredict(data);
     } catch (error) {
       console.error("Prediction failed:", error);
+      setError(error.message);
+      alert("❌ Prediction Failed: " + error.message);
     } finally {
       setIsLoading(false);
     }
@@ -167,7 +176,10 @@ export default function SidebarFilters({
           className={`predict-button ${isLoading ? 'loading' : ''}`}
         >
           {isLoading ? (
-            <span className="loader"></span>
+            <div className="loading-state">
+              <span className="loader"></span>
+              <span className="loading-text">PREDICTING...</span>
+            </div>
           ) : (
             <span className="btn-text">INITIALIZE PREDICTION</span>
           )}
@@ -183,7 +195,38 @@ export default function SidebarFilters({
         <span className="version">v1.5.0-CatBoost</span>
       </div>
 
+      {error && (
+        <div className="error-banner">
+          <span className="error-icon">⚠️</span>
+          <span className="error-msg">{error}</span>
+        </div>
+      )}
+
       <style jsx>{`
+        .loading-state {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+        }
+        .loading-text {
+          font-size: 11px;
+          letter-spacing: 2px;
+        }
+        .error-banner {
+          background: rgba(239, 68, 68, 0.1);
+          border: 1px solid rgba(239, 68, 68, 0.2);
+          padding: 12px;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+        .error-msg {
+          font-size: 11px;
+          color: #f87171;
+          font-weight: 500;
+        }
         .sidebar-container {
           background: #0a0f1e;
           width: 320px;
