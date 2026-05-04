@@ -100,14 +100,15 @@ export default async function handler(req, res) {
 
         // --- 2. คำนวณ Confidence Score (0-100%) ---
         // จำลองจากความเสถียรของอุณหภูมิและ NDVI (ค่ากลางๆ จะมีความเชื่อมั่นสูง)
-        const temp = point.temp || 30;
-        const tempAnomaly = Math.abs(temp - 32);
+        const currentTemp = simTemp !== undefined && simTemp !== null ? simTemp : (point.temp || 30);
+        const tempAnomaly = Math.abs(currentTemp - 32);
         let conf = 92 - (tempAnomaly * 0.8); // พื้นฐาน 92% ลดลงตามความผิดปกติ
         if (conf < 65) conf = 65; // ขั้นต่ำ 65%
         if (conf > 98) conf = 98; // สูงสุด 98%
 
         return {
           ...point,
+          temp: currentTemp, // ส่งค่าอุณหภูมิที่ใช้จำลองกลับไปด้วย
           risk: scaledRisk / 100, // เก็บเป็น 0-1 เพื่อใช้กับสีเดิม
           displayRisk: scaledRisk, // ส่งค่า 0-100 ไปแสดงผล
           confidence: Math.round(conf)
@@ -115,12 +116,16 @@ export default async function handler(req, res) {
       });
     } catch (err) {
       console.error("Batch Prediction Error:", err);
-      finalPoints = points.slice(0, 50).map(p => ({
-        ...p,
-        risk: p.risk_prob / 100,
-        displayRisk: p.risk_prob,
-        confidence: 85
-      }));
+      finalPoints = points.slice(0, 50).map(p => {
+        const currentTemp = simTemp !== undefined && simTemp !== null ? simTemp : (p.temp || 30);
+        return {
+          ...p,
+          temp: currentTemp,
+          risk: p.risk_prob / 100,
+          displayRisk: p.risk_prob,
+          confidence: 85
+        };
+      });
     }
 
     const avgRiskDisplay = finalPoints.reduce((acc, p) => acc + p.displayRisk, 0) / finalPoints.length;
