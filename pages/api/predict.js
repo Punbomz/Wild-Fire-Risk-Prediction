@@ -12,19 +12,20 @@ export default async function handler(req, res) {
     // 1. โหลดข้อมูลรายจุด (พิกัดและฟีเจอร์พื้นฐาน)
     const pointsPath = path.join(process.cwd(), 'data', 'district_points_data.json');
     const pointsData = JSON.parse(fs.readFileSync(pointsPath, 'utf8'));
-    const points = pointsData[province] ? pointsData[province][district] : [];
+    const allPoints = pointsData[province] ? pointsData[province][district] : [];
 
-    if (!points || points.length === 0) {
+    if (!allPoints || allPoints.length === 0) {
       return res.status(404).json({ message: 'ไม่พบข้อมูลในพื้นที่ที่เลือก' });
     }
 
-    // 2. เรียกใช้ Python Inference Server สำหรับแต่ละจุด
-    // ในขั้นตอนผลิตจริง แนะนำให้ส่งไปทำนายแบบ Batch (ส่งทีเดียวหลายจุด) เพื่อความเร็ว
-    // แต่สำหรับตัวอย่างนี้ เราจะส่งไปขอผลลัพธ์โมเดลจริง
+    // 2. สุ่มเลือก 50 จุดกระจายทั่วพื้นที่ (Random Sampling)
+    // แทนที่จะเลือก 50 จุดแรก เราจะสลับลำดับแบบสุ่มเพื่อให้ครอบคลุมพื้นที่ได้ดีขึ้น
+    const shuffledPoints = [...allPoints].sort(() => Math.random() - 0.5);
+    const selectedPoints = shuffledPoints.slice(0, 50);
 
-    const featureBatch = (points || []).slice(0, 50).map((point, idx) => {
+    const featureBatch = (selectedPoints || []).map((point, idx) => {
       const featureArray = Array(32).fill(0);
-      
+
       // 1. ปรับอุณหภูมิให้มีความต่างรายจุด (บวก/ลบ จากอุณหภูมิที่จำลอง)
       const baseTemp = simTemp !== undefined && simTemp !== null ? simTemp : (point.temp || 30);
       // เพิ่มความต่างเล็กน้อยตามลักษณะพื้นเดิม (-1 ถึง +1 องศา) เพื่อไม่ให้ทุกจุดเท่ากันเป๊ะ
@@ -32,7 +33,7 @@ export default async function handler(req, res) {
       const currentTemp = baseTemp + localVariation;
 
       const isSim = !!req.body.isSimulation;
-      const tempFactor = Math.max(0, (currentTemp - 24) / 26); 
+      const tempFactor = Math.max(0, (currentTemp - 24) / 26);
 
       // จำลองค่าดัชนีพืชพรรณให้แปรผันตามจุด (ไม่ให้เท่ากันหมด)
       const pointVariation = (Math.cos(idx * 0.5) * 0.05);
@@ -46,7 +47,7 @@ export default async function handler(req, res) {
       featureArray[6] = isSim ? simNIR : 0.35;
       featureArray[7] = isSim ? simSWIR1 : 0.22;
       featureArray[8] = isSim ? (simSWIR1 * 0.85) : 0.18;
-      
+
       // 2. Weather & Environment
       featureArray[9] = currentTemp;
 
@@ -91,40 +92,40 @@ export default async function handler(req, res) {
       });
       const result = await response.json();
 
-      finalPoints = points.slice(0, 50).map((point, idx) => {
+      finalPoints = selectedPoints.map((point, idx) => {
         const rawProb = (result.probabilities && result.probabilities[idx] !== undefined)
           ? result.probabilities[idx]
           : (point.risk_prob / 100);
 
         // --- 1. ปรับสเกลความเสี่ยง (Softened Normalization) ---
         let scaledRisk = (rawProb / 0.22) * 100;
-        if (scaledRisk > 95) scaledRisk = 95; 
-        if (scaledRisk < 2) scaledRisk = 2;   
+        if (scaledRisk > 95) scaledRisk = 95;
+        if (scaledRisk < 2) scaledRisk = 2;
 
         // --- 2. คำนวณ Confidence Score ให้ต่างกันในแต่ละจุด ---
         const baseTemp = simTemp !== undefined && simTemp !== null ? simTemp : (point.temp || 30);
         const localVariation = point.temp ? (point.temp - 30) * 0.1 : (Math.sin(idx) * 0.5);
         const currentTemp = baseTemp + localVariation;
-        
+
         const tempAnomaly = Math.abs(currentTemp - 32);
         // เพิ่มความเชื่อมั่นตามคุณภาพของข้อมูล (จำลองจากความสม่ำเสมอรายจุด)
-        const pointQuality = 10 - Math.abs(Math.sin(idx * 0.8) * 5); 
-        let conf = 92 - (tempAnomaly * 0.8) - pointQuality; 
-        
+        const pointQuality = 10 - Math.abs(Math.sin(idx * 0.8) * 5);
+        let conf = 92 - (tempAnomaly * 0.8) - pointQuality;
+
         if (conf < 60) conf = 60;
         if (conf > 98) conf = 98;
 
         return {
           ...point,
-          temp: currentTemp, 
-          risk: scaledRisk / 100, 
-          displayRisk: scaledRisk, 
+          temp: currentTemp,
+          risk: scaledRisk / 100,
+          displayRisk: scaledRisk,
           confidence: Math.round(conf)
         };
       });
     } catch (err) {
       console.error("Batch Prediction Error:", err);
-      finalPoints = points.slice(0, 50).map(p => {
+      finalPoints = selectedPoints.map(p => {
         const currentTemp = simTemp !== undefined && simTemp !== null ? simTemp : (p.temp || 30);
         return {
           ...p,

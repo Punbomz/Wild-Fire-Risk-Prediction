@@ -319,12 +319,15 @@ export default function MapView({
           <CircleMarker
             key={`point-${idx}`}
             center={[point.lat, point.lng]}
-            radius={6 + (point.risk * 4)}
+            // รัศมีแบบ Dynamic: เสี่ยงสูงวงจะกว้างขึ้น
+            radius={point.risk > 0.75 ? 12 : 7}
             pathOptions={{
               fillColor: getDynamicColor(point.risk),
               color: "#fff",
-              weight: 1,
-              fillOpacity: 0.8
+              weight: 0.8,
+              fillOpacity: point.risk > 0.75 ? 0.9 : 0.7,
+              // ใส่ class เฉพาะสำหรับจุดเสี่ยงสูงเพื่อให้กระพริบ
+              className: point.risk > 0.75 ? "pulse-marker" : "static-marker"
             }}
           >
             <Tooltip direction="top" offset={[0, -5]} opacity={1} className="risk-tooltip-wrapper">
@@ -383,6 +386,31 @@ export default function MapView({
           background-color: #1e293b !important;
           color: #f97316 !important;
         }
+
+        /* ─── Risk Point Animations ─── */
+        .pulse-marker {
+          filter: drop-shadow(0 0 12px rgba(239, 68, 68, 0.7));
+          animation: point-pulse 2s infinite ease-in-out;
+        }
+
+        .static-marker {
+          filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.3));
+        }
+
+        @keyframes point-pulse {
+          0% { transform: scale(1); stroke-width: 1; stroke-opacity: 0.8; }
+          50% { transform: scale(1.2); stroke-width: 6; stroke-opacity: 0.3; }
+          100% { transform: scale(1); stroke-width: 1; stroke-opacity: 0.8; }
+        }
+
+        .risk-tooltip-wrapper .leaflet-tooltip {
+          background: #0f172a !important;
+          border: 1px solid rgba(255,255,255,0.1) !important;
+          border-radius: 12px !important;
+          padding: 0 !important;
+          box-shadow: 0 10px 25px rgba(0,0,0,0.5) !important;
+        }
+
       `}</style>
     </div>
   );
