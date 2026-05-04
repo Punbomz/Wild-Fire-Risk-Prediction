@@ -1,5 +1,6 @@
-import { MapContainer, TileLayer, GeoJSON, useMap, CircleMarker, Tooltip, ZoomControl } from "react-leaflet";
+import { MapContainer, TileLayer, GeoJSON, useMap, CircleMarker, Marker, Tooltip, ZoomControl } from "react-leaflet";
 import { useEffect, useRef, useCallback } from "react";
+import L from "leaflet";
 
 // ─── Map controller: zoom to province or district ──────────────────────────
 function MapController({ selectedProvince, selectedDistrict, provData, geoData }) {
@@ -264,6 +265,31 @@ function DistrictLayer({
   );
 }
 
+// ─── Tooltip Content Renderer ──────────────────────────────────────────
+const renderTooltip = (point) => (
+  <div className="risk-tooltip">
+    <div className="tooltip-header">Risk Point Analysis</div>
+    <div className="tooltip-row">
+      <span className="tooltip-label">Coordinates:</span>
+      <span className="tooltip-value">{point.lat.toFixed(4)}, {point.lng.toFixed(4)}</span>
+    </div>
+    <div className="tooltip-row">
+      <span className="tooltip-label">Temperature:</span>
+      <span className="tooltip-value" style={{ color: '#ef4444', fontWeight: 'bold' }}>{point.temp.toFixed(1)} °C</span>
+    </div>
+    <div className="tooltip-row">
+      <span className="tooltip-label">Risk Level:</span>
+      <span className="tooltip-value" style={{ color: getDynamicColor(point.risk), fontWeight: 'bold' }}>
+        {(point.risk * 100).toFixed(1)}%
+      </span>
+    </div>
+    <div className="tooltip-row">
+      <span className="tooltip-label">Confidence:</span>
+      <span className="tooltip-value">{point.confidence}%</span>
+    </div>
+  </div>
+);
+
 // ─── Main Component ────────────────────────────────────────────────────────
 export default function MapView({
   geoData,
@@ -315,46 +341,51 @@ export default function MapView({
         )}
 
         {/* ─── Risk Points (Clusters) ─── */}
-        {predictionResult && predictionResult.points && predictionResult.points.map((point, idx) => (
-          <CircleMarker
-            key={`point-${idx}`}
-            center={[point.lat, point.lng]}
-            // รัศมีแบบ Dynamic: เสี่ยงสูงวงจะกว้างขึ้น
-            radius={point.risk > 0.75 ? 12 : 7}
-            pathOptions={{
-              fillColor: getDynamicColor(point.risk),
-              color: "#fff",
-              weight: 0.8,
-              fillOpacity: point.risk > 0.75 ? 0.9 : 0.7,
-              // ใส่ class เฉพาะสำหรับจุดเสี่ยงสูงเพื่อให้กระพริบ
-              className: point.risk > 0.75 ? "pulse-marker" : "static-marker"
-            }}
-          >
-            <Tooltip direction="top" offset={[0, -5]} opacity={1} className="risk-tooltip-wrapper">
-              <div className="risk-tooltip">
-                <div className="tooltip-header">Risk Point Analysis</div>
-                <div className="tooltip-row">
-                  <span className="tooltip-label">Coordinates:</span>
-                  <span className="tooltip-value">{point.lat.toFixed(4)}, {point.lng.toFixed(4)}</span>
-                </div>
-                <div className="tooltip-row">
-                  <span className="tooltip-label">Temperature:</span>
-                  <span className="tooltip-value" style={{ color: '#ef4444', fontWeight: 'bold' }}>{point.temp.toFixed(1)} °C</span>
-                </div>
-                <div className="tooltip-row">
-                  <span className="tooltip-label">Risk Level:</span>
-                  <span className="tooltip-value" style={{ color: getDynamicColor(point.risk), fontWeight: 'bold' }}>
-                    {(point.risk * 100).toFixed(1)}%
-                  </span>
-                </div>
-                <div className="tooltip-row">
-                  <span className="tooltip-label">Confidence:</span>
-                  <span className="tooltip-value">{point.confidence}%</span>
-                </div>
-              </div>
-            </Tooltip>
-          </CircleMarker>
-        ))}
+        {predictionResult && predictionResult.points && predictionResult.points.map((point, idx) => {
+          const isHighRisk = point.risk > 0.5;
+          
+          if (isHighRisk) {
+            // สำหรับจุดเสี่ยงสูง ใช้ Marker + DivIcon เพื่อให้ทำ Animation CSS ได้แน่นอน
+            const customIcon = L.divIcon({
+              className: "custom-div-icon",
+              html: `<div class="pulse-ring" style="background-color: ${getDynamicColor(point.risk)}"></div>
+                     <div class="main-dot" style="background-color: ${getDynamicColor(point.risk)}"></div>`,
+              iconSize: [20, 20],
+              iconAnchor: [10, 10]
+            });
+
+            return (
+              <Marker
+                key={`point-${idx}`}
+                position={[point.lat, point.lng]}
+                icon={customIcon}
+              >
+                <Tooltip direction="top" offset={[0, -10]} opacity={1} className="risk-tooltip-wrapper">
+                  {renderTooltip(point)}
+                </Tooltip>
+              </Marker>
+            );
+          }
+
+          // สำหรับจุดเสี่ยงต่ำ/กลาง ใช้ CircleMarker ปกติ
+          return (
+            <CircleMarker
+              key={`point-${idx}`}
+              center={[point.lat, point.lng]}
+              radius={7}
+              pathOptions={{
+                fillColor: getDynamicColor(point.risk),
+                color: "#fff",
+                weight: 1,
+                fillOpacity: 0.7
+              }}
+            >
+              <Tooltip direction="top" offset={[0, -5]} opacity={1} className="risk-tooltip-wrapper">
+                {renderTooltip(point)}
+              </Tooltip>
+            </CircleMarker>
+          );
+        })}
 
         <MapController
           selectedProvince={selectedProvince}
@@ -387,21 +418,51 @@ export default function MapView({
           color: #f97316 !important;
         }
 
-        /* ─── Risk Point Animations ─── */
-        .pulse-marker {
-          filter: drop-shadow(0 0 12px rgba(239, 68, 68, 0.7));
-          animation: point-pulse 2s infinite ease-in-out;
+        /* ─── Risk Point Animations (HTML DivIcon) ─── */
+        .custom-div-icon {
+          background: none !important;
+          border: none !important;
         }
 
-        .static-marker {
-          filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.3));
+        .main-dot {
+          width: 12px;
+          height: 12px;
+          border-radius: 50%;
+          border: 2px solid white;
+          box-shadow: 0 0 15px rgba(255, 255, 255, 0.5);
+          position: absolute;
+          top: 4px;
+          left: 4px;
+          z-index: 2;
         }
 
-        @keyframes point-pulse {
-          0% { transform: scale(1); stroke-width: 1; stroke-opacity: 0.8; }
-          50% { transform: scale(1.2); stroke-width: 6; stroke-opacity: 0.3; }
-          100% { transform: scale(1); stroke-width: 1; stroke-opacity: 0.8; }
+        .pulse-ring {
+          width: 20px;
+          height: 20px;
+          border-radius: 50%;
+          position: absolute;
+          top: 0;
+          left: 0;
+          animation: glow-pulse 2s infinite;
+          opacity: 0.6;
+          z-index: 1;
         }
+
+        @keyframes glow-pulse {
+          0% {
+            transform: scale(0.8);
+            box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+          }
+          70% {
+            transform: scale(2.2);
+            box-shadow: 0 0 0 15px rgba(239, 68, 68, 0);
+          }
+          100% {
+            transform: scale(0.8);
+            box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+          }
+        }
+
 
         .risk-tooltip-wrapper .leaflet-tooltip {
           background: #0f172a !important;
