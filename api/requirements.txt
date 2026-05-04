@@ -2,5 +2,5 @@ flask
 flask-cors
 pandas
 numpy
-catboost
+catboost==1.2
 scikit-learn

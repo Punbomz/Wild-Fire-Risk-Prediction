@@ -11,17 +11,33 @@ CORS(app) # สำคัญมาก! เพื่อให้ Vercel เรี�
 # โหลดโมเดล
 MODEL_PATH = os.path.join(os.path.dirname(__file__), 'models', 'wildfire_improved_model_d.cbm')
 model = cb.CatBoostClassifier()
+model_loaded = False
+
 if os.path.exists(MODEL_PATH):
-    model.load_model(MODEL_PATH)
-    print("✅ Model loaded successfully on Render")
+    try:
+        model.load_model(MODEL_PATH)
+        model_loaded = True
+        print("✅ Model loaded successfully on Render")
+    except Exception as e:
+        print(f"❌ Error loading model: {e}")
+else:
+    print(f"❌ Model file not found at: {MODEL_PATH}")
 
 @app.route('/')
 def health():
-    return jsonify({"status": "online", "message": "Ignis AI Backend is running on Render"})
+    return jsonify({
+        "status": "online", 
+        "model_loaded": model_loaded,
+        "model_path": MODEL_PATH,
+        "message": "Ignis AI Backend is running"
+    })
 
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
+        if not model_loaded:
+            return jsonify({"error": "Model not loaded on server"}), 500
+
         data = request.json
         features = data.get('features', []) # รับอาเรย์ของฟีเจอร์ (Batch)
         
