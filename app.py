@@ -3,10 +3,10 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import numpy as np
 import catboost as cb
-import csv
+import pandas as pd
 
 app = Flask(__name__)
-CORS(app) # สำคัญมาก! เพื่อให้ Vercel เรียกข้ามมาหา Render ได้
+CORS(app) 
 
 # โหลดโมเดล
 MODEL_PATH = os.path.join(os.path.dirname(__file__), 'models', 'wildfire_improved_model_d.cbm')
@@ -28,7 +28,6 @@ def health():
     return jsonify({
         "status": "online", 
         "model_loaded": model_loaded,
-        "model_path": MODEL_PATH,
         "message": "Ignis AI Backend is running"
     })
 
@@ -39,23 +38,29 @@ def predict():
             return jsonify({"error": "Model not loaded on server"}), 500
 
         data = request.json
-        features = data.get('features', []) # รับอาเรย์ของฟีเจอร์ (Batch)
+        features = data.get('features', []) 
         
         if not features:
             return jsonify({"error": "No features provided"}), 400
             
+        # ใช้ Pandas DataFrame เพื่อให้ CatBoost จัดการเรื่องประเภทข้อมูล (เช่น String) ได้ดีขึ้น
+        df = pd.DataFrame(features)
+        
         # ทำนายผล
-        preds = model.predict_proba(features)
+        preds = model.predict_proba(df)
         probabilities = preds[:, 1].tolist()
+        
+        # Log สำหรับ Debug (ดูใน Render Dashboard)
+        print(f"Predicted {len(probabilities)} points. First 5 probs: {probabilities[:5]}")
         
         return jsonify({
             "status": "success",
             "probabilities": probabilities
         })
     except Exception as e:
+        print(f"❌ Prediction Error: {e}")
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    # Render จะกำหนด Port ให้ผ่าน Environment Variable
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
