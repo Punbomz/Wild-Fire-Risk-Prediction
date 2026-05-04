@@ -98,7 +98,7 @@ export default async function handler(req, res) {
           : (point.risk_prob / 100);
 
         // --- 1. ปรับสเกลความเสี่ยง (Softened Normalization) ---
-        let scaledRisk = (rawProb / 0.22) * 100;
+        let scaledRisk = (rawProb / 0.35) * 100;
         if (scaledRisk > 95) scaledRisk = 95;
         if (scaledRisk < 2) scaledRisk = 2;
 
