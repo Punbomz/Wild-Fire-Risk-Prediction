@@ -21,62 +21,62 @@ export default async function handler(req, res) {
     // 2. เรียกใช้ Python Inference Server สำหรับแต่ละจุด
     // ในขั้นตอนผลิตจริง แนะนำให้ส่งไปทำนายแบบ Batch (ส่งทีเดียวหลายจุด) เพื่อความเร็ว
     // แต่สำหรับตัวอย่างนี้ เราจะส่งไปขอผลลัพธ์โมเดลจริง
-    
+
     const featureBatch = (points || []).slice(0, 50).map((point) => {
-      const featureArray = Array(32).fill(0); 
+      const featureArray = Array(32).fill(0);
       // บังคับใช้ simTemp จาก request body ถ้ามี
       const currentTemp = simTemp !== undefined && simTemp !== null ? simTemp : (point.temp || 30);
       const isSim = !!req.body.isSimulation;
-      
+
       // 1. Spectral Indices (ปรับให้สัมพันธ์กับอุณหภูมิในโหมดจำลอง)
       // เพิ่มความไว: ยิ่งร้อนยิ่งแห้งเร็วขึ้น
       const tempFactor = Math.max(0, (currentTemp - 24) / 26); // สเกล 24-50C -> 0-1
-      
+
       const simNDVI = Math.max(0.02, 0.42 - (tempFactor * 0.4));
       const simSWIR1 = Math.min(0.95, 0.18 + (tempFactor * 0.75));
       const simNIR = Math.max(0.05, 0.45 - (tempFactor * 0.4));
-      
-      featureArray[0] = isSim ? simNDVI : (point.ndvi || 0.4); 
-      featureArray[1] = isSim ? -0.25 : 0.05; 
+
+      featureArray[0] = isSim ? simNDVI : (point.ndvi || 0.4);
+      featureArray[1] = isSim ? -0.25 : 0.05;
       featureArray[2] = isSim ? 0.05 : 0.5;
       featureArray[6] = isSim ? simNIR : 0.35;
       featureArray[7] = isSim ? simSWIR1 : 0.22;
       featureArray[8] = isSim ? (simSWIR1 * 0.85) : 0.18;
-      
+
       // 2. Weather & Environment
       featureArray[9] = currentTemp;
-      
-      const moisture = isSim 
-        ? Math.max(0.005, 0.18 - (tempFactor * 0.175)) 
+
+      const moisture = isSim
+        ? Math.max(0.005, 0.18 - (tempFactor * 0.175))
         : Math.max(0.05, 0.25 - (currentTemp - 25) * 0.01);
-      
+
       featureArray[10] = moisture;
-      
+
       featureArray[13] = point.elev || 300;
       featureArray[14] = point.slope || 10;
       featureArray[16] = 10;
       featureArray[17] = req.body.simMonth || new Date().getMonth() + 1;
       featureArray[18] = province;
       featureArray[19] = district;
-      
+
       // 3. Fire Factors (เพิ่มความไวของ drought_proxy)
-      featureArray[22] = isSim ? (3.0 + tempFactor * 6) : 2.5; 
+      featureArray[22] = isSim ? (3.0 + tempFactor * 6) : 2.5;
       featureArray[23] = isSim ? (tempFactor * 0.8) : Math.max(0, (currentTemp - 30) * 0.05);
-      
+
       return featureArray;
     });
 
     // เรียกใช้ Python API (ส่งแบบ Batch ทีเดียว 50 จุด)
     let finalPoints = [];
     // --- เปลี่ยน URL ตรงนี้เป็น URL ที่คุณได้จาก Render ---
-    const RENDER_URL = "https://your-app-name.onrender.com/predict";
+    const RENDER_URL = "https://wild-fire-risk-prediction.onrender.com/predict";
     const API_URL = process.env.NODE_ENV === 'production' ? RENDER_URL : "http://127.0.0.1:5000/predict";
 
     try {
       const response = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           features: featureBatch,
           isSimulation: !!req.body.isSimulation,
           simTemp: simTemp,
@@ -86,12 +86,12 @@ export default async function handler(req, res) {
         }),
       });
       const result = await response.json();
-      
+
       finalPoints = points.slice(0, 50).map((point, idx) => {
-        const rawProb = (result.probabilities && result.probabilities[idx] !== undefined) 
-              ? result.probabilities[idx] 
-              : (point.risk_prob / 100);
-        
+        const rawProb = (result.probabilities && result.probabilities[idx] !== undefined)
+          ? result.probabilities[idx]
+          : (point.risk_prob / 100);
+
         // --- 1. ปรับสเกลความเสี่ยง (Softened Normalization) ---
         // ปรับให้ 0.20 คือจุดอ้างอิงของความเสี่ยงสูงสุด และใช้เพดานที่ 95%
         let scaledRisk = (rawProb / 0.22) * 100;
@@ -115,17 +115,17 @@ export default async function handler(req, res) {
       });
     } catch (err) {
       console.error("Batch Prediction Error:", err);
-      finalPoints = points.slice(0, 50).map(p => ({ 
-        ...p, 
+      finalPoints = points.slice(0, 50).map(p => ({
+        ...p,
         risk: p.risk_prob / 100,
         displayRisk: p.risk_prob,
-        confidence: 85 
+        confidence: 85
       }));
     }
 
     const avgRiskDisplay = finalPoints.reduce((acc, p) => acc + p.displayRisk, 0) / finalPoints.length;
     let riskLevel = "Low";
-    
+
     // เกณฑ์ใหม่บนสเกล 0-100
     if (avgRiskDisplay > 75) riskLevel = "High";
     else if (avgRiskDisplay > 50) riskLevel = "Medium";
