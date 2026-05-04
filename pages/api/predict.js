@@ -67,18 +67,22 @@ export default async function handler(req, res) {
     });
 
     // เรียกใช้ Python API (ส่งแบบ Batch ทีเดียว 50 จุด)
-    const apiUrl = process.env.NODE_ENV === 'development' 
-      ? 'http://localhost:8000/predict' 
-      : `${process.env.VERCEL_URL ? 'https://' + process.env.VERCEL_URL : ''}/api/predict_ai`;
-
     let finalPoints = [];
+    // --- เปลี่ยน URL ตรงนี้เป็น URL ที่คุณได้จาก Render ---
+    const RENDER_URL = "https://your-app-name.onrender.com/predict";
+    const API_URL = process.env.NODE_ENV === 'production' ? RENDER_URL : "http://127.0.0.1:5000/predict";
+
     try {
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-            batch_features: featureBatch,
-            isSimulation: req.body.isSimulation 
+          features: featureBatch,
+          isSimulation: !!req.body.isSimulation,
+          simTemp: simTemp,
+          simMonth: req.body.simMonth,
+          province: province,
+          district: district
         }),
       });
       const result = await response.json();
