@@ -1,4 +1,5 @@
 flask
-pandas
-catboost
+flask-cors
 numpy
+catboost
+pandas
