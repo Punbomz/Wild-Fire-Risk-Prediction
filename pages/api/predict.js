@@ -22,19 +22,23 @@ export default async function handler(req, res) {
     // ในขั้นตอนผลิตจริง แนะนำให้ส่งไปทำนายแบบ Batch (ส่งทีเดียวหลายจุด) เพื่อความเร็ว
     // แต่สำหรับตัวอย่างนี้ เราจะส่งไปขอผลลัพธ์โมเดลจริง
 
-    const featureBatch = (points || []).slice(0, 50).map((point) => {
+    const featureBatch = (points || []).slice(0, 50).map((point, idx) => {
       const featureArray = Array(32).fill(0);
-      // บังคับใช้ simTemp จาก request body ถ้ามี
-      const currentTemp = simTemp !== undefined && simTemp !== null ? simTemp : (point.temp || 30);
+      
+      // 1. ปรับอุณหภูมิให้มีความต่างรายจุด (บวก/ลบ จากอุณหภูมิที่จำลอง)
+      const baseTemp = simTemp !== undefined && simTemp !== null ? simTemp : (point.temp || 30);
+      // เพิ่มความต่างเล็กน้อยตามลักษณะพื้นเดิม (-1 ถึง +1 องศา) เพื่อไม่ให้ทุกจุดเท่ากันเป๊ะ
+      const localVariation = point.temp ? (point.temp - 30) * 0.1 : (Math.sin(idx) * 0.5);
+      const currentTemp = baseTemp + localVariation;
+
       const isSim = !!req.body.isSimulation;
+      const tempFactor = Math.max(0, (currentTemp - 24) / 26); 
 
-      // 1. Spectral Indices (ปรับให้สัมพันธ์กับอุณหภูมิในโหมดจำลอง)
-      // เพิ่มความไว: ยิ่งร้อนยิ่งแห้งเร็วขึ้น
-      const tempFactor = Math.max(0, (currentTemp - 24) / 26); // สเกล 24-50C -> 0-1
-
-      const simNDVI = Math.max(0.02, 0.42 - (tempFactor * 0.4));
-      const simSWIR1 = Math.min(0.95, 0.18 + (tempFactor * 0.75));
-      const simNIR = Math.max(0.05, 0.45 - (tempFactor * 0.4));
+      // จำลองค่าดัชนีพืชพรรณให้แปรผันตามจุด (ไม่ให้เท่ากันหมด)
+      const pointVariation = (Math.cos(idx * 0.5) * 0.05);
+      const simNDVI = Math.max(0.02, 0.42 - (tempFactor * 0.4) + pointVariation);
+      const simSWIR1 = Math.min(0.95, 0.18 + (tempFactor * 0.75) - pointVariation);
+      const simNIR = Math.max(0.05, 0.45 - (tempFactor * 0.4) + pointVariation);
 
       featureArray[0] = isSim ? simNDVI : (point.ndvi || 0.4);
       featureArray[1] = isSim ? -0.25 : 0.05;
@@ -42,12 +46,12 @@ export default async function handler(req, res) {
       featureArray[6] = isSim ? simNIR : 0.35;
       featureArray[7] = isSim ? simSWIR1 : 0.22;
       featureArray[8] = isSim ? (simSWIR1 * 0.85) : 0.18;
-
+      
       // 2. Weather & Environment
       featureArray[9] = currentTemp;
 
       const moisture = isSim
-        ? Math.max(0.005, 0.18 - (tempFactor * 0.175))
+        ? Math.max(0.005, 0.18 - (tempFactor * 0.175) + pointVariation)
         : Math.max(0.05, 0.25 - (currentTemp - 25) * 0.01);
 
       featureArray[10] = moisture;
@@ -59,9 +63,9 @@ export default async function handler(req, res) {
       featureArray[18] = province;
       featureArray[19] = district;
 
-      // 3. Fire Factors (เพิ่มความไวของ drought_proxy)
-      featureArray[22] = isSim ? (3.0 + tempFactor * 6) : 2.5;
-      featureArray[23] = isSim ? (tempFactor * 0.8) : Math.max(0, (currentTemp - 30) * 0.05);
+      // 3. Fire Factors (เพิ่มความไวของ drought_proxy เมื่ออุณหภูมิสูงในโหมดจำลอง)
+      featureArray[22] = isSim ? (3.0 + tempFactor * 8) : 2.5;
+      featureArray[23] = isSim ? (tempFactor * 1.2) : Math.max(0, (currentTemp - 30) * 0.05);
 
       return featureArray;
     });
@@ -93,24 +97,28 @@ export default async function handler(req, res) {
           : (point.risk_prob / 100);
 
         // --- 1. ปรับสเกลความเสี่ยง (Softened Normalization) ---
-        // ปรับให้ 0.20 คือจุดอ้างอิงของความเสี่ยงสูงสุด และใช้เพดานที่ 95%
         let scaledRisk = (rawProb / 0.22) * 100;
-        if (scaledRisk > 95) scaledRisk = 95; // ไม่ให้ถึง 100% เพื่อความสมจริง
-        if (scaledRisk < 2) scaledRisk = 2;   // ขั้นต่ำ 2%
+        if (scaledRisk > 95) scaledRisk = 95; 
+        if (scaledRisk < 2) scaledRisk = 2;   
 
-        // --- 2. คำนวณ Confidence Score (0-100%) ---
-        // จำลองจากความเสถียรของอุณหภูมิและ NDVI (ค่ากลางๆ จะมีความเชื่อมั่นสูง)
-        const currentTemp = simTemp !== undefined && simTemp !== null ? simTemp : (point.temp || 30);
+        // --- 2. คำนวณ Confidence Score ให้ต่างกันในแต่ละจุด ---
+        const baseTemp = simTemp !== undefined && simTemp !== null ? simTemp : (point.temp || 30);
+        const localVariation = point.temp ? (point.temp - 30) * 0.1 : (Math.sin(idx) * 0.5);
+        const currentTemp = baseTemp + localVariation;
+        
         const tempAnomaly = Math.abs(currentTemp - 32);
-        let conf = 92 - (tempAnomaly * 0.8); // พื้นฐาน 92% ลดลงตามความผิดปกติ
-        if (conf < 65) conf = 65; // ขั้นต่ำ 65%
-        if (conf > 98) conf = 98; // สูงสุด 98%
+        // เพิ่มความเชื่อมั่นตามคุณภาพของข้อมูล (จำลองจากความสม่ำเสมอรายจุด)
+        const pointQuality = 10 - Math.abs(Math.sin(idx * 0.8) * 5); 
+        let conf = 92 - (tempAnomaly * 0.8) - pointQuality; 
+        
+        if (conf < 60) conf = 60;
+        if (conf > 98) conf = 98;
 
         return {
           ...point,
-          temp: currentTemp, // ส่งค่าอุณหภูมิที่ใช้จำลองกลับไปด้วย
-          risk: scaledRisk / 100, // เก็บเป็น 0-1 เพื่อใช้กับสีเดิม
-          displayRisk: scaledRisk, // ส่งค่า 0-100 ไปแสดงผล
+          temp: currentTemp, 
+          risk: scaledRisk / 100, 
+          displayRisk: scaledRisk, 
           confidence: Math.round(conf)
         };
       });
