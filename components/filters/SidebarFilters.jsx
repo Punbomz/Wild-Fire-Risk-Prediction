@@ -10,10 +10,10 @@ export default function SidebarFilters({
   predictionResult,
   simTemp,
   onSimTempChange,
+  isLoading, // Use prop instead of internal state
 }) {
   const [provinces, setProvinces] = useState([]);
   const [districts, setDistricts] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
   const [isSimMode, setIsSimMode] = useState(false);
   const [simMonth, setSimMonth] = useState(new Date().getMonth() + 1);
   const [error, setError] = useState(null);
@@ -37,35 +37,12 @@ export default function SidebarFilters({
     setDistricts(dists);
   }, [selectedProvince, geoData]);
 
-  const handlePredict = async () => {
-    if (!selectedProvince || !selectedDistrict) return;
-    setIsLoading(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/predict", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          province: selectedProvince, 
-          district: selectedDistrict,
-          simTemp: isSimMode ? simTemp : null,
-          simMonth: isSimMode ? simMonth : (new Date().getMonth() + 1),
-          isSimulation: isSimMode
-        }),
+  const handlePredict = () => {
+    if (onPredict) {
+      onPredict({
+        isSimMode,
+        simMonth
       });
-      
-      if (!response.ok) {
-        throw new Error("AI Server Error: Could not generate prediction.");
-      }
-      
-      const data = await response.json();
-      if (onPredict) onPredict(data);
-    } catch (error) {
-      console.error("Prediction failed:", error);
-      setError(error.message);
-      alert("❌ Prediction Failed: " + error.message);
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -138,7 +115,7 @@ export default function SidebarFilters({
             <div className="sim-field">
               <div className="sim-label-row">
                 <span className="sim-label">Heat Stress Index</span>
-                <span className="sim-value">{simTemp}°C</span>
+                <span className="sim-label">{simTemp}°C</span>
               </div>
               <input
                 type="range"
@@ -250,7 +227,7 @@ export default function SidebarFilters({
 
         .brand-logo {
           display: flex;
-          items-center: center;
+          align-items: center;
           gap: 12px;
         }
 
@@ -399,12 +376,6 @@ export default function SidebarFilters({
           font-size: 11px;
           font-weight: 600;
           color: #94a3b8;
-        }
-
-        .sim-value {
-          font-size: 16px;
-          font-weight: 800;
-          color: #f97316;
         }
 
         .sim-slider {

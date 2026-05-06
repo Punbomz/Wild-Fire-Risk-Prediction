@@ -2,6 +2,7 @@ import dynamic from "next/dynamic";
 import { useState, useEffect } from "react";
 import Header from "../components/layout/Header";
 import SidebarFilters from "../components/filters/SidebarFilters";
+import FloatingMobileNav from "../components/layout/FloatingMobileNav";
 
 const MapView = dynamic(() => import("../components/map/MapView"), { ssr: false });
 
@@ -14,6 +15,7 @@ export default function DashboardPage() {
   const [districtRisk, setDistrictRisk] = useState({});
   const [simTemp, setSimTemp] = useState(30);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     // ปิด sidebar อัตโนมัติถ้าเปิดในมือถือครั้งแรก
@@ -46,16 +48,41 @@ export default function DashboardPage() {
     }
   };
 
-  const handlePredictResult = (result) => {
-    setPredictionResult(result);
-    if (window.innerWidth < 768) setIsSidebarOpen(false); // ปิด sidebar หลังกดทำนายในมือถือ
-    if (result && result.avgRisk !== undefined) {
-      setDistrictRisk((prev) => {
-        const next = { ...prev };
-        if (!next[result.province]) next[result.province] = {};
-        next[result.province][result.district] = result.avgRisk;
-        return next;
+  const handlePerformPrediction = async (simOptions = {}) => {
+    if (!selectedProvince || !selectedDistrict) return;
+    
+    setIsLoading(true);
+    try {
+      const response = await fetch("/api/predict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          province: selectedProvince, 
+          district: selectedDistrict,
+          simTemp: simOptions.isSimMode ? simTemp : null,
+          simMonth: simOptions.isSimMode ? simOptions.simMonth : (new Date().getMonth() + 1),
+          isSimulation: simOptions.isSimMode
+        }),
       });
+      
+      if (!response.ok) throw new Error("AI Server Error");
+      
+      const data = await response.json();
+      setPredictionResult(data);
+      
+      if (data && data.avgRisk !== undefined) {
+        setDistrictRisk((prev) => {
+          const next = { ...prev };
+          if (!next[data.province]) next[data.province] = {};
+          next[data.province][data.district] = data.avgRisk;
+          return next;
+        });
+      }
+    } catch (error) {
+      console.error("Prediction failed:", error);
+      alert("❌ Prediction Failed: " + error.message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -63,14 +90,7 @@ export default function DashboardPage() {
     <>
       <Header />
       
-      {/* ปุ่ม Toggle สำหรับมือถือ */}
-      <button 
-        className={`mobile-toggle ${isSidebarOpen ? 'active' : ''}`}
-        onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-      >
-        {isSidebarOpen ? "✕" : "☰"}
-      </button>
-
+      {/* Sidebar for Desktop */}
       <div className="container">
         <div className={`sidebar-wrapper ${isSidebarOpen ? 'open' : 'closed'}`}>
           <SidebarFilters
@@ -79,10 +99,11 @@ export default function DashboardPage() {
             selectedDistrict={selectedDistrict}
             onProvinceChange={handleProvinceChange}
             onDistrictChange={handleDistrictChange}
-            onPredict={handlePredictResult}
+            onPredict={handlePerformPrediction}
             predictionResult={predictionResult}
             simTemp={simTemp}
             onSimTempChange={setSimTemp}
+            isLoading={isLoading}
           />
         </div>
         
@@ -99,6 +120,19 @@ export default function DashboardPage() {
           />
         </div>
       </div>
+
+      {/* Floating Mobile Navigation */}
+      <FloatingMobileNav
+        geoData={geoData}
+        selectedProvince={selectedProvince}
+        selectedDistrict={selectedDistrict}
+        onProvinceChange={handleProvinceChange}
+        onDistrictChange={handleDistrictChange}
+        onPredict={handlePerformPrediction}
+        simTemp={simTemp}
+        onSimTempChange={setSimTemp}
+        isLoading={isLoading}
+      />
 
       <style jsx>{`
         .container {
@@ -119,44 +153,17 @@ export default function DashboardPage() {
           position: relative;
         }
 
-        .mobile-toggle {
-          display: none;
-          position: fixed;
-          bottom: 25px;
-          left: 25px;
-          width: 56px;
-          height: 56px;
-          background: #f97316;
-          color: white;
-          border-radius: 50%;
-          border: none;
-          font-size: 24px;
-          box-shadow: 0 4px 20px rgba(249, 115, 22, 0.4);
-          z-index: 3000;
-          cursor: pointer;
-          transition: all 0.3s;
-        }
-
         @media (max-width: 767px) {
-          .mobile-toggle {
-            display: flex;
-            align-items: center;
-            justify-content: center;
+          .container {
+            height: calc(100vh - 60px);
           }
 
           .sidebar-wrapper {
-            position: absolute;
-            left: 0;
-            top: 0;
-            height: 100%;
+            display: none; /* เอา sidebar ออกในมือถือ */
           }
 
-          .sidebar-wrapper.closed {
-            transform: translateX(-100%);
-          }
-
-          .sidebar-wrapper.open {
-            transform: translateX(0);
+          .map-main-wrapper {
+            width: 100%;
           }
         }
       `}</style>
